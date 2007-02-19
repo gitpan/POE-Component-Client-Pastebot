@@ -8,7 +8,8 @@ no_index:
     - inc
     - t
 requires: 
+  HTML::TokeParser: 0
   LWP::UserAgent: 0
   POE: 0.38
   URI: 0
-version: 0.01
+version: 0.02
