@@ -1,6 +1,9 @@
 POE::Component::Client::Pastebot
 ================================
 
+0.03	Tue Feb 27 09:46:47 GMT 2007
+	- Switched online test to use erxz.com
+
 0.02	Mon Feb 19 11:27:06 GMT 2007
 	- Added kwalitee test.
 
