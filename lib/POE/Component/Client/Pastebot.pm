@@ -7,7 +7,7 @@ use URI;
 use HTML::TokeParser;
 use vars qw($VERSION);
 
-$VERSION = '0.03';
+$VERSION = '0.04';
 
 sub spawn {
   my $package = shift;
@@ -235,7 +235,7 @@ __END__
 
 =head1 NAME
 
-POE::Component::Client::Pastebot - interact with Bot::Pastebot web services.
+POE::Component::Client::Pastebot - Interact with Bot::Pastebot web services from POE.
 
 =head1 SYNOPSIS
 
