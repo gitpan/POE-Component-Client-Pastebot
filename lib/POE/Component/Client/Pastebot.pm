@@ -7,7 +7,7 @@ use URI;
 use HTML::TokeParser;
 use vars qw($VERSION);
 
-$VERSION = '0.04';
+$VERSION = '1.00';
 
 sub spawn {
   my $package = shift;
