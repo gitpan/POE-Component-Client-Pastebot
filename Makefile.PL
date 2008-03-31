@@ -1,3 +1,4 @@
+use strict;
 use inc::Module::Install;
 name 'POE-Component-Client-Pastebot';
 author 'Chris Williams <chris@bingosnet.co.uk>';
@@ -5,8 +6,11 @@ license 'perl';
 version_from 'lib/POE/Component/Client/Pastebot.pm';
 abstract_from 'lib/POE/Component/Client/Pastebot.pm';
 build_requires 'Test::More' => 0.47;
+requires 'warnings::compat' => 0 if $] < 5.006;
 requires 'LWP::UserAgent' => 0;
 requires 'HTML::TokeParser' => 0;
 requires 'URI' => 0;
 requires 'POE' => 0.38;
+requires 'POE::Wheel::Run' => 0;
+requires 'POE::Filter::Reference' => 0;
 WriteAll();

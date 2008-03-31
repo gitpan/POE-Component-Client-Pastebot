@@ -1,6 +1,7 @@
 use Test::More tests => 6;
 
 use strict;
+use warnings;
 use POE;
 use_ok('POE::Component::Client::Pastebot');
 
