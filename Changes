@@ -1,6 +1,9 @@
 POE::Component::Client::Pastebot
 ================================
 
+1.04	Mon May 19 17:26:06 BST 2008
+	- removed kwalitee test and added license information.
+
 1.02	Mon Mar 31 14:12:27 BST 2008
 	- Kwalitee fixes.
 
