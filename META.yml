@@ -5,17 +5,16 @@ author:
 build_requires:
   Test::More: 0.47
 distribution_type: module
-generated_by: 'Module::Install version 0.73'
+generated_by: 'Module::Install version 0.77'
 license: perl
 meta-spec:
-  url: http://module-build.sourceforge.net/META-spec-v1.3.html
-  version: 1.3
+  url: http://module-build.sourceforge.net/META-spec-v1.4.html
+  version: 1.4
 name: POE-Component-Client-Pastebot
 no_index:
   directory:
     - inc
     - t
-    - examples
     - examples
 requires:
   HTML::TokeParser: 0
@@ -23,6 +22,9 @@ requires:
   POE: 0.38
   POE::Filter::Reference: 0
   POE::Wheel::Run: 0
+  Storable: 2.05
   URI: 0
-  perl: 5.000
-version: 1.04
+  perl: 5.6.0
+resources:
+  license: http://dev.perl.org/licenses/
+version: 1.06
