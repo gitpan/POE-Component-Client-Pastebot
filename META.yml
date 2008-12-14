@@ -24,7 +24,7 @@ requires:
   POE::Wheel::Run: 0
   Storable: 2.05
   URI: 0
-  perl: 5.6.0
+  perl: 5.8.0
 resources:
   license: http://dev.perl.org/licenses/
-version: 1.06
+version: 1.08

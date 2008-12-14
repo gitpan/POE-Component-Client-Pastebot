@@ -9,7 +9,7 @@ use URI;
 use HTML::TokeParser;
 use vars qw($VERSION);
 
-$VERSION = '1.06';
+$VERSION = '1.08';
 
 $Storable::Deparse = 1;
 $Storable::Eval = 1;
