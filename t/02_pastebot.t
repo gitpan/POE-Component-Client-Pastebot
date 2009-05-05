@@ -38,7 +38,7 @@ sub _time_out {
 sub _child {
   my ($kernel,$what,$who) = @_[KERNEL,ARG0,ARG1];
   if ( $what eq 'create' ) {
-	$kernel->post( $who => 'paste' => { event => '_got_paste', paste => '.', url => $pastebot } );
+	$kernel->post( $who => 'paste' => { event => '_got_paste', paste => 'Moo', url => $pastebot } );
 	pass('created');
 	return;
   }

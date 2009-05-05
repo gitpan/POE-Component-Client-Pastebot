@@ -2,17 +2,29 @@ package POE::Component::Client::Pastebot;
 
 use strict;
 use warnings;
-use Storable;
-use POE qw(Wheel::Run Filter::Reference);
-use LWP::UserAgent;
+use POE qw(Component::Client::HTTP);
+use HTTP::Request::Common;
 use URI;
 use HTML::TokeParser;
 use vars qw($VERSION);
 
-$VERSION = '1.08';
+$VERSION = '1.10';
 
-$Storable::Deparse = 1;
-$Storable::Eval = 1;
+# Stolen from POE::Wheel. This is static data, shared by all
+my $current_id = 0;
+my %active_identifiers;
+
+sub _allocate_identifier {
+  while (1) {
+    last unless exists $active_identifiers{ ++$current_id };
+  }
+  return $active_identifiers{$current_id} = $current_id;
+}
+
+sub _free_identifier {
+  my $id = shift;
+  delete $active_identifiers{$id};
+}
 
 sub spawn {
   my $package = shift;
@@ -26,7 +38,7 @@ sub spawn {
 		      paste    => '_command',
 		      fetch    => '_command',
 	   },
-	   $self => [ qw(_start _spawn_wheel _child_error _child_closed _child_stdout _child_stderr _sig_child) ],
+	   $self => [ qw(_start _dispatch _http_request _http_response) ],
 	],
 	heap => $self,
 	( ref($options) eq 'HASH' ? ( options => $options ) : () ),
@@ -47,11 +59,16 @@ sub _start {
   my ($kernel,$self) = @_[KERNEL,OBJECT];
   $self->{session_id} = $_[SESSION]->ID();
   if ( $self->{alias} ) {
-	$kernel->alias_set( $self->{alias} );
-  } else {
-	$kernel->refcount_increment( $self->{session_id} => __PACKAGE__ );
+     $kernel->alias_set( $self->{alias} );
+  } 
+  else {
+     $kernel->refcount_increment( $self->{session_id} => __PACKAGE__ );
   }
-  $kernel->yield( '_spawn_wheel' );
+  $self->{_httpc} = 'httpc-' . $self->{session_id};
+  POE::Component::Client::HTTP->spawn(
+     Alias           => $self->{_httpc},
+     FollowRedirects => 2,
+  );
   undef;
 }
 
@@ -60,53 +77,11 @@ sub _shutdown {
   $kernel->alias_remove( $_ ) for $kernel->alias_list();
   $kernel->refcount_decrement( $self->{session_id} => __PACKAGE__ ) unless $self->{alias};
   $self->{_shutdown} = 1;
-  $self->{wheel}->shutdown_stdin if $self->{wheel};
+  $kernel->post( $self->{_httpc}, 'shutdown' );
   undef;
 }
 
-sub _sig_child {
-  my ($kernel,$self) = @_[KERNEL,OBJECT];
-  return $kernel->sig_handled() if $self->{_shutdown};
-  undef;
-}
-
-sub _spawn_wheel {
-  my ($kernel,$self) = @_[KERNEL,OBJECT];
-  $self->{wheel} = POE::Wheel::Run->new(
-	Program => \&_lwp_process,
-	ErrorEvent => '_child_error',
-	CloseEvent => '_child_closed',
-	StdoutEvent => '_child_stdout', 
-	StderrEvent => '_child_stderr',
-	StdioFilter => POE::Filter::Reference->new('Storable'),
-	StderrFilter => POE::Filter::Line->new(),
-	( $^O eq 'MSWin32' ? ( CloseOnCall => 0 ) : ( CloseOnCall => 1 ) ),
-  );
-
-  $kernel->yield( 'shutdown' ) unless $self->{wheel};
-  $kernel->sig_child( $self->{wheel}->PID, '_sig_child' );
-  undef;
-}
-
-sub _child_closed {
-  my ($kernel,$self) = @_[KERNEL,OBJECT];
-  delete $self->{wheel};
-  undef;
-}
-
-sub _child_error {
-  my ($kernel,$self) = @_[KERNEL,OBJECT];
-  delete $self->{wheel};
-  undef;
-}
-
-sub _child_stderr {
-  my ($kernel,$self,$input) = @_[KERNEL,OBJECT,ARG0];
-  warn "$input\n" if $self->{debug};
-  undef;
-}
-
-sub _child_stdout {
+sub _dispatch {
   my ($kernel,$self,$input) = @_[KERNEL,OBJECT,ARG0];
   my $session = delete $input->{sender};
   my $event = delete $input->{event};
@@ -151,91 +126,95 @@ sub _command {
   $args->{sender} = $sender;
   $args->{command} = $state;
   $kernel->refcount_increment( $sender => __PACKAGE__ );
-  $self->{wheel}->put( $args );
+  $kernel->yield( '_http_request', $args );
   undef;
 }
 
-sub _lwp_process {
-  if ( $^O eq 'MSWin32' ) {
-     binmode(STDIN); binmode(STDOUT);
-  }
-  my $raw;
-  my $size = 4096;
-  my $filter = POE::Filter::Reference->new();
-  my $ua = LWP::UserAgent->new( env_proxy => 1, keep_alive => 0, timeout => 17 );
-
-  INPUT: while ( sysread ( STDIN, $raw, $size ) ) {
-    my $requests = $filter->get( [ $raw ] );
-    REQUEST: foreach my $req ( @{ $requests } ) {
-	if ( $req->{command} eq 'paste' ) {
-	    my $url =
-   		URI->new(
-    		$req->{'url'} . ( ( $req->{'url'} !~ m,/$, ) ? '/' : '' ) . 'paste' )
-   		->canonical;
-	    unless ( defined $url ) {
-		$req->{error} = "could not determine url from $req->{url}";
-	    }
-	    else {
-   		$req->{'channel'} =~ s/^/#/ if $req->{'channel'} and $req->{'channel'} !~ /^#/;
-		my %postargs = map {
-         	 ( defined $req->{$_} and $req->{$_} ne '' )
-       		 ? ( $_ => $req->{$_} )
-       		 : ()
-    		} qw(channel nick summary);
-		$postargs{'paste'} = $req->{paste};
-		my $response = $ua->post( $url, \%postargs );
-		unless ( $response->is_success ) {
-      		  if ( $response->is_error ) {
-		    ($req->{error}) = $response->error_as_HTML =~ /^(\d{3}.+)/m;
-      		  } 
-		  else {
-		    $req->{error} = 'unknown error';
-      		  }
-    		}
-		else {
-		    if ( $response->content ) {
-			my $p = HTML::TokeParser->new( \$response->content );
-			$p->get_tag('a');
-			$req->{pastelink} = $p->get_text('/a');
-		    }
-		}
-		$req->{response} = $response;
-	    }
-	    my $response = $filter->put( [ $req ] );
-  	    print STDOUT @$response;
-	    next REQUEST;
-	} 
-	if ( $req->{command} eq 'fetch' ) {
-	    my $url;
-	    my $urltmp = URI->new( $req->{url} . ( ( $req->{url} !~ m,\?tx=on$, ) ? '?tx=on' : '' ) );
-	    if ( defined $urltmp and defined $urltmp->scheme and $urltmp->scheme =~ /http/ ) {
-    		$url = $urltmp->canonical;
-		my $response = $ua->get( $url );
-		unless ( $response->is_success ) {
-      		  if ( $response->is_error ) {
-		    ($req->{error}) = $response->error_as_HTML =~ /^(\d{3}.+)/m;
-      		  } 
-		  else {
-		    $req->{error} = 'unknown error';
-      		  }
-    		}
-		else {
-		    $req->{content} = $response->content;
-		}
-		$req->{response} = $response;
-	    } 
-	    else {
-		$req->{error} = 'problem with url provided';
-	    }
-	    my $response = $filter->put( [ $req ] );
-  	    print STDOUT @$response;
-	    next REQUEST;
-	} 
+sub _http_request {
+  my ($kernel,$self,$req) = @_[KERNEL,OBJECT,ARG0];
+  if ( $req->{command} eq 'paste' ) {
+    my $url =
+	URI->new(
+    	 $req->{'url'} . ( ( $req->{'url'} !~ m,/$, ) ? '/' : '' ) . 'paste' )
+   	   ->canonical;
+    unless ( defined $url ) {
+	$req->{error} = "could not determine url from $req->{url}";
+	$kernel->yield( '_dispatch', $req );
     }
-  }
+    else {
+	$req->{'channel'} =~ s/^/#/ if $req->{'channel'} and $req->{'channel'} !~ /^#/;
+	my %postargs = map {
+       	 ( defined $req->{$_} and $req->{$_} ne '' )
+       	 ? ( $_ => $req->{$_} )
+       	 : ()
+    	} qw(channel nick summary);
+	$postargs{'paste'} = $req->{paste};
+	my $id = _allocate_identifier();
+	$self->{_requests}->{ $id } = $req;
+	$kernel->post( 
+		$self->{_httpc}, 
+		'request', 
+		'_http_response', 
+		POST( $url, \%postargs ),
+		"$id",
+	);
+    }
+    return;
+  } 
+  if ( $req->{command} eq 'fetch' ) {
+    my $url;
+    my $urltmp = URI->new( $req->{url} . ( ( $req->{url} !~ m,\?tx=on$, ) ? '?tx=on' : '' ) );
+    if ( defined $urltmp and defined $urltmp->scheme and $urltmp->scheme =~ /http/ ) {
+ 	$url = $urltmp->canonical;
+	my $id = _allocate_identifier();
+	$self->{_requests}->{ $id } = $req;
+	$kernel->post( 
+		$self->{_httpc}, 
+		'request', 
+		'_http_response', 
+		GET( $url ),
+		"$id",
+	);
+    } 
+    else {
+	$req->{error} = 'problem with url provided';
+	$kernel->yield( '_dispatch', $req );
+    }
+    return;
+  } 
+  return;
 }
 
-1;
+sub _http_response {
+  my ($kernel,$self,$request_packet,$response_packet) = @_[KERNEL,OBJECT,ARG0,ARG1];
+  my $id = $request_packet->[1];
+  my $req = delete $self->{_requests}->{ $id };
+  _free_identifier( $id );
+  my $response = $response_packet->[0];
+  $req->{response} = $response;
+  unless ( $response->is_success ) {
+    if ( $response->is_error ) {
+      ($req->{error}) = $response->error_as_HTML =~ /^(\d{3}.+)/m;
+    } 
+    else {
+      $req->{error} = 'unknown error';
+    }
+  }
+  else {
+    if ( $req->{command} eq 'paste' and $response->content ) {
+	my $p = HTML::TokeParser->new( \$response->content );
+	$p->get_tag('a');
+	$req->{pastelink} = $p->get_text('/a');
+    }
+    if ( $req->{command} eq 'fetch' and $response->content ) {
+	$req->{content} = $response->content;
+    }
+  }
+  $kernel->yield( '_dispatch', $req );
+  return;
+}
+
+'Paste and cut';
 __END__
 
 =head1 NAME
@@ -314,7 +293,7 @@ It was inspired by L<http://sial.org/> pbotutil.
 
 =over
 
-=item spawn
+=item C<spawn>
 
 Starts a new POE::Component::Client::Pastebot session and returns an object.
 Takes a number of arguments all are optional.
@@ -328,11 +307,11 @@ Takes a number of arguments all are optional.
 
 =over
 
-=item session_id
+=item C<session_id>
 
 Takes no arguments. Returns the POE Session ID of the component.
 
-=item shutdown
+=item C<shutdown>
 
 Takes no arguments, terminates the component.
 
@@ -344,7 +323,7 @@ What POE events our component will accept.
 
 =over
 
-=item paste
+=item C<paste>
 
 Sends a paste request to a pastebot url. Accepts either a hashref of the following
 values or a list of the same:
@@ -358,7 +337,7 @@ values or a list of the same:
 
 You may also pass arbitary key/values in the hashref ( as demonstrated in the SYNOPSIS ). Arbitary keys should have an underscore prefix '_'.
 
-=item fetch
+=item C<fetch>
 
 Retrieves the text from a given paste url. Accepts either a hashref of the following
 values or a list of the same:
@@ -368,7 +347,7 @@ values or a list of the same:
 
 You may also pass arbitary key/values in the hashref ( as demonstrated in the SYNOPSIS ). Arbitary keys should have an underscore prefix '_'.
 
-=item shutdown
+=item C<shutdown>
 
 Takes no arguments, terminates the component.
 
@@ -390,11 +369,11 @@ The following additional key/values will be present depending on the type of req
 
 =over
 
-=item paste
+=item C<paste>
 
   'pastelink', the URL of the paste that was made;
 
-=item fetch
+=item C<fetch>
 
   'content', the contents of the paste URL that was retrieved;
 
@@ -402,11 +381,11 @@ The following additional key/values will be present depending on the type of req
 
 =head1 AUTHOR
 
-Chris 'BinGOs' Williams <chris@bingosnet.co.uk>
+Chris C<BinGOs> Williams <chris@bingosnet.co.uk>
 
 =head1 LICENSE
 
-Copyright C<(c)> Chris Williams.
+Copyright E<copy> Chris Williams.
 
 This module may be used, modified, and distributed under the same terms as Perl itself. Please see the license that came with your Perl distribution for details.
 
