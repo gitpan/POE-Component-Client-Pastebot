@@ -4,11 +4,15 @@ author:
   - 'Chris Williams <chris@bingosnet.co.uk>'
 build_requires:
   ExtUtils::MakeMaker: 6.42
+  HTTP::Date: 0
+  HTTP::Response: 0
+  POE::Filter::HTTP::Parser: 1.02
   Test::More: 0.47
+  Test::POE::Server::TCP: 1.06
 configure_requires:
   ExtUtils::MakeMaker: 6.42
 distribution_type: module
-generated_by: 'Module::Install version 0.86'
+generated_by: 'Module::Install version 0.91'
 license: perl
 meta-spec:
   url: http://module-build.sourceforge.net/META-spec-v1.4.html
@@ -19,8 +23,13 @@ no_index:
     - examples
     - inc
     - t
+provides:
+  POE::Component::Client::Pastebot:
+    file: lib/POE/Component/Client/Pastebot.pm
+    version: 1.12
 requires:
   HTML::TokeParser: 0
+  HTTP::Request::Common: 0
   POE: 1.005
   POE::Component::Client::HTTP: 0.88
   URI: 0
@@ -29,4 +38,4 @@ resources:
   homepage: http://github.com/bingos/poe-component-client-pastebot/tree
   license: http://dev.perl.org/licenses/
   repository: git://github.com/bingos/poe-component-client-pastebot.git
-version: 1.10
+version: 1.12
